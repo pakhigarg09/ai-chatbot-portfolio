@@ -4,13 +4,20 @@ from streamlit_chat import message
 import os
 from dotenv import load_dotenv
 
-# Load the hidden keys from the .env file
 load_dotenv()
 
-# Setup Groq Client using the hidden key
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# Smart API Key Retrieval
+if "GROQ_API_KEY" in st.secrets:
+    # If running on Streamlit Cloud, use this:
+    api_key = st.secrets["GROQ_API_KEY"]
+else:
+    # If running locally on your computer, use this:
+    api_key = os.environ.get("GROQ_API_KEY")
 
-# ... (the rest of your code stays exactly the same!) ...
+# Setup Groq Client
+client = Groq(api_key=api_key)
+
+# ... (the rest of your api_calling function and UI code stays exactly the same) ...
 
 # 2. The API Calling Function using Llama 3 on Groq
 def api_calling(prompt):
