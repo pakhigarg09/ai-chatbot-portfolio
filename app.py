@@ -1,64 +1,92 @@
 import streamlit as st
 from groq import Groq
-from streamlit_chat import message
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- 1. Page Configuration (UX Upgrade) ---
+st.set_page_config(page_title="Advanced AI Assistant", page_icon="🚀", layout="wide")
+
 # Smart API Key Retrieval
 if "GROQ_API_KEY" in st.secrets:
-    # If running on Streamlit Cloud, use this:
     api_key = st.secrets["GROQ_API_KEY"]
 else:
-    # If running locally on your computer, use this:
     api_key = os.environ.get("GROQ_API_KEY")
 
-# Setup Groq Client
+# Setup Groq Client using the variable, NOT a string
 client = Groq(api_key=api_key)
 
-# ... (the rest of your api_calling function and UI code stays exactly the same) ...
+# --- 2. Sidebar & Settings (UX & Persona Upgrades) ---
+with st.sidebar:
+    st.title("⚙️ AI Brain Settings")
+    st.markdown("Adjust how the AI behaves.")
+    
+    # Custom Persona Input
+    system_prompt = st.text_area(
+        "System Prompt (Persona)", 
+        value="You are a highly intelligent, concise, and helpful AI assistant.", 
+        height=150
+    )
+    
+    # Temperature Slider
+    temperature = st.slider("Creativity (Temperature)", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
+    
+    st.divider()
+    
+    # Clear Chat Button
+    if st.button("🗑️ Clear Chat History"):
+        st.session_state['messages'] = []
+        st.rerun()
 
-# 2. The API Calling Function using Llama 3 on Groq
-def api_calling(prompt):
+# --- 3. Chat Memory Setup ---
+# We are changing how we store memory to be cleaner and match OpenAI/Groq standards
+if 'messages' not in st.session_state:
+    st.session_state['messages'] = []
+
+# --- 4. The Upgraded API Function ---
+def api_calling(user_input, sys_prompt, temp):
+    # Start the memory list with the System Prompt (The Persona)
+    api_messages = [{"role": "system", "content": sys_prompt}]
+    
+    # Attach all previous chat history so the AI remembers the conversation
+    for msg in st.session_state['messages']:
+        api_messages.append(msg)
+        
+    # Attach the user's newest message
+    api_messages.append({"role": "user", "content": user_input})
+    
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant", # A lightning-fast, highly capable free model
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
+        model="llama-3.1-8b-instant",
+        messages=api_messages,
         max_tokens=1024,
-        temperature=0.5,
+        temperature=temp,
     )
     return response.choices[0].message.content
 
-# 3. Streamlit UI Header
-st.title("⚡ My Lightning Fast Chatbot")
+# --- 5. Main Chat Interface ---
+st.title("🚀 My Advanced Groq Assistant")
 
-# 4. Setup Session State (Memory)
-if 'user_input' not in st.session_state:
-    st.session_state['user_input'] = []
+# Display all past messages using native Streamlit chat UI
+for msg in st.session_state['messages']:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-if 'ai_response' not in st.session_state:
-    st.session_state['ai_response'] = []
-
-# 5. Get User Input
-user_input = st.text_input("Write here:", key="input")
-
-# 6. Process the Input
-if user_input:
-    output = api_calling(user_input)
+# --- 6. Handle New User Input ---
+if user_input := st.chat_input("Type your message here..."):
     
-    st.session_state.user_input.append(user_input)
-    st.session_state.ai_response.append(output)
-
-# 7. Display the Chat History
-if st.session_state['user_input']:
-    for i in range(len(st.session_state['user_input']) - 1, -1, -1):
-        message(st.session_state['ai_response'][i], 
-                avatar_style="miniavs", 
-                key=str(i) + 'bot')
-                
-        message(st.session_state["user_input"][i], 
-                avatar_style="icons", 
-                is_user=True, 
-                key=str(i) + 'user')
+    # Show user message instantly
+    with st.chat_message("user"):
+        st.markdown(user_input)
+        
+    # Save user message to memory
+    st.session_state['messages'].append({"role": "user", "content": user_input})
+    
+    # Generate and show AI response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            ai_response = api_calling(user_input, system_prompt, temperature)
+            st.markdown(ai_response)
+            
+    # Save AI response to memory
+    st.session_state['messages'].append({"role": "assistant", "content": ai_response})
