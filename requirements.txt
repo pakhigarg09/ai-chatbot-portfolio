@@ -3,3 +3,4 @@ groq
 langchain-groq
 PyPDF2
 python-dotenv
+pandas
