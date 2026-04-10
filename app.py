@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- 1. Page Configuration ---
-st.set_page_config(page_title="InteriorAI Advisor", page_icon="🏠", layout="wide")
+# --- 1. Page Configuration & CSS ---
+st.set_page_config(page_title="InteriorAI Advisor", page_icon="📐", layout="wide")
 
 # API Key Setup
 if "GROQ_API_KEY" in st.secrets:
@@ -19,79 +19,111 @@ else:
 
 llm = ChatGroq(groq_api_key=api_key, model_name="llama-3.1-8b-instant")
 
-# --- 2. Sidebar: Design Studio Settings ---
-with st.sidebar:
-    st.title("🏠 Design Studio")
-    st.markdown("Upload floor plans, style guides, or site notes (PDF).")
-    
-    uploaded_file = st.file_uploader("Upload PDF Reference", type="pdf")
-    if uploaded_file:
-        reader = PyPDF2.PdfReader(uploaded_file)
-        content = ""
-        for page in reader.pages:
-            content += page.extract_text()
-        st.session_state['doc_text'] = content
-        st.success("Reference Loaded!")
-
-    st.divider()
-    
-    # Custom Persona for Architecture/Interiors
-    system_prompt = st.text_area(
-        "AI Designer Persona", 
-        value="You are an expert Interior Designer and Architect. Your goal is to provide advice on space planning, color palettes, furniture styles, and lighting based on the user's budget and room type. Be professional, creative, and practical.",
-        height=150
-    )
-    
-    temp = st.slider("Design Creativity", 0.0, 1.0, 0.7)
-
-    # --- Metrics Export for your PRD ---
-    st.divider()
-    if st.button("📊 Export Chat Logs for PRD"):
-        if 'log_data' in st.session_state and st.session_state.log_data:
-            df = pd.DataFrame(st.session_state.log_data)
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download CSV", csv, "design_assistant_logs.csv", "text/csv")
-        else:
-            st.warning("No chat data to export yet!")
-
-# --- 3. Chat Logic & RAG ---
+# --- 2. Session State Initialization ---
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'log_data' not in st.session_state:
     st.session_state.log_data = []
+if 'total_tokens' not in st.session_state:
+    st.session_state.total_tokens = 0
 
-st.title("🛋️ Interior Design Advisor")
-st.info("Ask me about room layouts, color schemes, or upload a floor plan to get started.")
+# --- 3. Sidebar: Design Studio & Analytics ---
+with st.sidebar:
+    st.title("📐 Design Studio Setup")
+    st.markdown("Upload floor plans or client briefs (PDF).")
+    
+    uploaded_file = st.file_uploader("Upload Reference Document", type="pdf")
+    if uploaded_file:
+        with st.spinner("Analyzing site data..."):
+            reader = PyPDF2.PdfReader(uploaded_file)
+            content = ""
+            for page in reader.pages:
+                content += page.extract_text()
+            st.session_state['doc_text'] = content
+            st.success("Site Data Loaded!")
 
+    st.divider()
+    
+    # Custom Persona
+    system_prompt = st.text_area(
+        "AI Persona Instructions", 
+        value="You are an expert Architect and Interior Designer. Provide practical, creative advice on space planning, palettes, and furniture. If the user hasn't provided a document, politely ask them to describe their space or upload a floor plan.",
+        height=120
+    )
+    temp = st.slider("Design Creativity (Temperature)", 0.0, 1.0, 0.7)
+
+    st.divider()
+    
+    # --- PM Analytics Dashboard ---
+    st.subheader("📊 PM Analytics")
+    st.metric(label="Total Tokens Used", value=st.session_state.total_tokens)
+    
+    if st.button("📥 Export Chat Logs (CSV)"):
+        if st.session_state.log_data:
+            df = pd.DataFrame(st.session_state.log_data)
+            csv = df.to_csv(index=False).encode('utf-8')
+            st.download_button("Download CSV", csv, "design_session_logs.csv", "text/csv")
+        else:
+            st.warning("No data to export.")
+            
+    if st.button("🗑️ Reset Session"):
+        st.session_state.messages = []
+        st.session_state.log_data = []
+        st.session_state.total_tokens = 0
+        if 'doc_text' in st.session_state:
+            del st.session_state['doc_text']
+        st.rerun()
+
+# --- 4. Main Chat Interface ---
+st.title("🛋️ AI Interior Design Advisor")
+
+# The "Empty State" Welcome Message
+if len(st.session_state.messages) == 0:
+    st.info("""
+    **Welcome to the Design Studio!** 👋  
+    To get the best results:
+    1. Upload a PDF floor plan or site notes in the sidebar.
+    2. Tell me your budget, preferred style (e.g., Japandi, Mid-Century), and the room type.
+    """)
+
+# Render past messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Ex: 'Suggest a Japandi style living room layout for a small apartment.'"):
-    # Log User Input
+# --- 5. AI Interaction Logic ---
+if prompt := st.chat_input("Ex: 'Suggest a layout for a 200 sq ft bedroom...'"):
+    # Render user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Generate AI Response
     with st.chat_message("assistant"):
-        # Inject PDF context if available
         full_context = system_prompt
         if 'doc_text' in st.session_state:
-            full_context += f"\n\nReference Document Context: {st.session_state['doc_text']}"
+            full_context += f"\n\nContext from Uploaded Document: {st.session_state['doc_text']}"
         
-        full_query = f"{full_context}\n\nUser Question: {prompt}"
+        full_query = f"{full_context}\n\nUser Request: {prompt}"
         
-        with st.spinner("Visualizing..."):
+        with st.spinner("Drafting design concepts..."):
+            # We use invoke and capture the response metadata for our Token Tracker!
             response = llm.invoke(full_query)
             answer = response.content
+            
+            # Extract token usage (The PM Flex)
+            tokens_used = response.response_metadata.get("token_usage", {}).get("total_tokens", 0)
+            st.session_state.total_tokens += tokens_used
+            
             st.markdown(answer)
             
-            # Log Data for PM Metrics
+            # Log data
             st.session_state.log_data.append({
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "user_query": prompt,
                 "ai_response": answer,
-                "creativity_setting": temp
+                "tokens_consumed": tokens_used
             })
             
     st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.rerun() # Force a quick refresh to update the Token Counter in the sidebar!
